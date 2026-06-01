@@ -63,7 +63,18 @@ struct ContentView: View {
 
 ## Status
 
-Scaffolded. The pentomino model + orientation engine and the 12-bag
-randomizer are implemented and tested; the game session, scoring, UI, and
-shaders are stubbed in and being built out in the Demo app first. See the
-build order in the package notes.
+**v0.1 — feature-complete and playable.**
+
+- **Engine** (`mvBlocksKit`): all 12 pentominoes (63 orientations), the flip
+  mechanic, 12-bag randomizer, gravity, scoring (combo + back-to-back +
+  five-row "Blocks-Out"), boost blocks, and a `ProgressStore` (UserDefaults +
+  SwiftData).
+- **UI** (`mvBlocksUI`): themeable SwiftUI views with Metal shaders (block
+  gloss, line-clear flash, celebration burst), ghost piece, next + hold panels,
+  gesture and DAS/ARR button controls, lock delay, pause, and settings + stats
+  sheets.
+- **Demo** (`Demo/mvBlocksDemo`): runs standalone. See `EMBEDDING.md` for host
+  integration.
+
+Covered by Swift Testing (engine + view-model). Next: feel-tuning and host
+integration.

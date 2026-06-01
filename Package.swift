@@ -40,5 +40,10 @@ let package = Package(
             dependencies: ["mvBlocksKit"],
             path: "Tests/mvBlocksKitTests"
         ),
+        .testTarget(
+            name: "mvBlocksUITests",
+            dependencies: ["mvBlocksUI"],
+            path: "Tests/mvBlocksUITests"
+        ),
     ]
 )
