@@ -95,6 +95,7 @@ struct BoardView: View {
         }
         .onChange(of: session.clearEventID) { _, _ in triggerFlash() }
         .onChange(of: session.celebrationEventID) { _, _ in triggerBurst() }
+        .onChange(of: session.detonationEventID) { _, _ in triggerBurst() }
     }
 
     private func overlayCard(title: String, subtitle: String? = nil, button: String, action: @escaping () -> Void) -> some View {

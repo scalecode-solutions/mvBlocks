@@ -94,7 +94,12 @@ public struct BlocksGameView: View {
 
     private var topPanels: some View {
         HStack(alignment: .top, spacing: 14) {
-            holdSlot
+            VStack(alignment: .leading, spacing: 4) {
+                Text("HOLD")
+                    .font(.caption2.bold())
+                    .foregroundStyle(theme.bodyColor)
+                HStack(spacing: 6) { holdSlot(0); holdSlot(1) }
+            }
             Divider().frame(height: 46).overlay(theme.gridLines)
             nextQueue
             Spacer()
@@ -102,19 +107,17 @@ public struct BlocksGameView: View {
         .frame(height: 50)
     }
 
-    private var holdSlot: some View {
-        Button { vm.input(.hold) } label: {
-            VStack(spacing: 4) {
-                Text("HOLD")
-                    .font(.caption2.bold())
-                    .foregroundStyle(theme.bodyColor)
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(theme.boardBackground)
-                        .frame(width: 50, height: 30)
-                    if let held = vm.session.held {
-                        piecePreview(.pentomino(held), cell: 6)
-                    }
+    /// A reserve slot: tap empty to park the current piece, tap filled to swap.
+    private func holdSlot(_ index: Int) -> some View {
+        Button { vm.toggleHold(slot: index) } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(theme.boardBackground)
+                    .frame(width: 44, height: 30)
+                if let held = vm.session.holds[index] {
+                    piecePreview(.pentomino(held), cell: 6)
+                } else {
+                    Image(systemName: "plus").font(.caption).foregroundStyle(theme.bodyColor.opacity(0.5))
                 }
             }
         }
@@ -155,19 +158,50 @@ public struct BlocksGameView: View {
     // MARK: - Boosts
 
     private var boostBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             boostButton(.single)
-            boostButton(.double)
+            boostButton(.bomb)
+            // Superbomb arm appears only once you've earned one.
+            if (vm.session.boosts[.superbomb] ?? 0) > 0 { boostButton(.superbomb) }
             Spacer()
-            if let queued = vm.session.queuedBoost {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.down.circle.fill")
-                    Text("\(queued.label) next")
-                }
-                .font(.caption.bold())
-                .foregroundStyle(theme.boostColor)
-            }
+            boomButton
+            // BIG BOOM appears only when a superbomb is on the board.
+            if vm.session.hasSuperbombOnBoard { bigBoomButton }
         }
+    }
+
+    /// Detonate all resting superbombs (6×6 + their rows/cols).
+    private var bigBoomButton: some View {
+        Button { vm.detonateSuperbombs() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "burst.fill")
+                Text("BIG BOOM")
+            }
+            .font(.subheadline.bold())
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(theme.superbombColor, in: RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(.white)
+        }
+        .disabled(vm.session.status != .playing)
+    }
+
+    /// Detonate all resting bombs (each clears its row + column).
+    private var boomButton: some View {
+        let live = vm.session.bombsOnBoard
+        return Button { vm.detonate() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "flame.fill")
+                Text("BOOM")
+            }
+            .font(.subheadline.bold())
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+            .background(live > 0 ? theme.bombColor : theme.boardBackground,
+                        in: RoundedRectangle(cornerRadius: 12))
+            .foregroundStyle(live > 0 ? .white : theme.bodyColor.opacity(0.4))
+        }
+        .disabled(live == 0 || vm.session.status != .playing)
     }
 
     private func boostButton(_ boost: Boost) -> some View {
@@ -180,7 +214,6 @@ public struct BlocksGameView: View {
                 // Draw the actual shape (1 cell vs 2 stacked cells) so the
                 // domino reads as two squares, not one big block.
                 piecePreview(.boost(boost), cell: 9)
-                    .frame(width: 12, alignment: .center)
                     .opacity(count > 0 ? 1 : 0.4)
                 Text("×\(count)")
                     .font(.subheadline.monospacedDigit())

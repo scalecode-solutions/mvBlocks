@@ -49,7 +49,7 @@ struct ViewModelInputTests {
         vm.startIfNeeded()
         vm.queueBoost(.single)
         #expect(vm.session.queuedBoost == .single)
-        #expect(vm.session.boosts[.single] == GameSession.startingBoosts - 1)
+        #expect(vm.session.boosts[.single] == GameSession.startingSingles - 1)
         vm.teardown()
     }
 

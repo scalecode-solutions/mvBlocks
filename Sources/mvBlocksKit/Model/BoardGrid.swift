@@ -62,4 +62,86 @@ public struct BoardGrid: Sendable, Codable {
         cells = survivors
         return cleared
     }
+
+    // MARK: - Bombs
+
+    /// Coordinates of all settled bomb cells, as `Coord(x: col, y: row)`.
+    public func bombCells() -> [Coord] {
+        var out: [Coord] = []
+        for y in 0..<height {
+            for x in 0..<width where cells[y][x] == .boost(.bomb) {
+                out.append(Coord(x, y))
+            }
+        }
+        return out
+    }
+
+    /// Detonate: clear every cell in the rows and columns of the given bombs,
+    /// then collapse each column downward. Because *all* given bombs are cleared
+    /// together, bombs sharing a row/column fold into one cascade automatically.
+    /// Returns the number of cells removed.
+    @discardableResult
+    public mutating func detonate(_ bombs: [Coord]) -> Int {
+        guard !bombs.isEmpty else { return 0 }
+        let rows = Set(bombs.map(\.y))
+        let cols = Set(bombs.map(\.x))
+        var removed = 0
+        for y in 0..<height {
+            for x in 0..<width where cells[y][x] != nil && (rows.contains(y) || cols.contains(x)) {
+                cells[y][x] = nil
+                removed += 1
+            }
+        }
+        collapseColumns()
+        return removed
+    }
+
+    /// Coordinates of all settled superbomb cells.
+    public func superbombCells() -> [Coord] {
+        var out: [Coord] = []
+        for y in 0..<height {
+            for x in 0..<width where cells[y][x] == .boost(.superbomb) {
+                out.append(Coord(x, y))
+            }
+        }
+        return out
+    }
+
+    /// Detonate all superbombs: clear a 6×6 block centered on each (2 cells out
+    /// in every direction) plus the full rows and columns they occupy, then
+    /// collapse columns. Returns cells removed.
+    @discardableResult
+    public mutating func detonateSuperbombs() -> Int {
+        let supers = superbombCells()
+        guard !supers.isEmpty else { return 0 }
+        let rows = Set(supers.map(\.y))
+        let cols = Set(supers.map(\.x))
+        var removed = 0
+        for y in 0..<height {
+            for x in 0..<width where cells[y][x] != nil {
+                let inCross = rows.contains(y) || cols.contains(x)
+                let inBlock = supers.contains { abs($0.y - y) <= 2 && abs($0.x - x) <= 2 }
+                if inCross || inBlock {
+                    cells[y][x] = nil
+                    removed += 1
+                }
+            }
+        }
+        collapseColumns()
+        return removed
+    }
+
+    /// Per-column gravity: each column's surviving cells fall to the bottom.
+    public mutating func collapseColumns() {
+        for x in 0..<width {
+            var stack: [PieceKind] = []
+            for y in 0..<height {
+                if let cell = cells[y][x] { stack.append(cell) }
+            }
+            let empties = height - stack.count
+            for y in 0..<height {
+                cells[y][x] = y < empties ? nil : stack[y - empties]
+            }
+        }
+    }
 }

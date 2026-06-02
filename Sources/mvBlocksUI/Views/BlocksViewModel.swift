@@ -105,6 +105,37 @@ public final class BlocksViewModel {
         }
     }
 
+    /// Park/swap the current pentomino against reserve slot `slot`.
+    public func toggleHold(slot: Int) {
+        guard session.status == .playing else { return }
+        if session.toggleHold(slot: slot) {
+            cancelLock()
+            lockResets = 0
+            evaluateLock()
+        }
+    }
+
+    /// Detonate all resting bombs (Boom button).
+    public func detonate() {
+        guard session.status == .playing, session.bombsOnBoard > 0 else { return }
+        let cleared = session.detonateBombs()
+        if cleared > 0 {
+            if hapticsEnabled { Haptics.play(.blocksOut) }
+            // The board collapsed under the active piece — re-evaluate the lock.
+            evaluateLock()
+        }
+    }
+
+    /// Detonate all resting superbombs (BIG BOOM button).
+    public func detonateSuperbombs() {
+        guard session.status == .playing, session.hasSuperbombOnBoard else { return }
+        let cleared = session.detonateSuperbombs()
+        if cleared > 0 {
+            if hapticsEnabled { Haptics.play(.blocksOut) }
+            evaluateLock()
+        }
+    }
+
     public func queueBoost(_ boost: Boost) {
         session.queueBoost(boost)
     }

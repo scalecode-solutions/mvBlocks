@@ -9,7 +9,9 @@ public struct GameSession: Sendable {
     public private(set) var status: GameStatus
     public private(set) var scoring: Scoring
     public private(set) var active: ActivePiece?
-    public private(set) var held: Pentomino?
+    /// Two reserve slots. Park the current pentomino into an empty slot, or swap
+    /// it back from a filled one — once per spawned piece.
+    public private(set) var holds: [Pentomino?] = [nil, nil]
     /// Remaining boost charges by type.
     public private(set) var boosts: [Boost: Int]
     /// A boost the player has armed to spawn next, ahead of the bag.
@@ -20,14 +22,23 @@ public struct GameSession: Sendable {
     public private(set) var lastClearedRows: [Int] = []
     /// Bumped on a "big" clear (2+ rows) — the UI watches this for a burst.
     public private(set) var celebrationEventID = 0
+    /// Bumped each detonation — the UI watches this for the explosion overlay.
+    public private(set) var detonationEventID = 0
     private var holdUsedThisTurn = false
+    private var linesTowardBomb = 0
+    private var linesTowardSuperbomb = 0
     private var bag: Bag
 
-    /// Starting free charges per boost type.
-    public static let startingBoosts = 5
-    /// Boost charges earned per row cleared.
-    public static let singlesPerRow = 1
-    public static let doublesPerRow = 1
+    /// Starting free charges.
+    public static let startingSingles = 5
+    public static let startingBombs = 3
+    /// Singles earned per row cleared.
+    public static let singlesPerLine = 1
+    /// Rows that must clear to earn one bomb (stingier than singles — bombs are
+    /// powerful).
+    public static let linesPerBomb = 3
+    /// Rows that must clear to earn one superbomb (the nuke).
+    public static let linesPerSuperbomb = 10
 
     public init(seed: UInt64 = 0x5EED, board: BoardGrid = BoardGrid()) {
         self.board = board
@@ -35,9 +46,14 @@ public struct GameSession: Sendable {
         self.scoring = Scoring()
         self.bag = Bag(seed: seed)
         self.active = nil
-        self.boosts = [.single: GameSession.startingBoosts, .double: GameSession.startingBoosts]
+        self.boosts = [.single: GameSession.startingSingles, .bomb: GameSession.startingBombs, .superbomb: 0]
         self.queuedBoost = nil
     }
+
+    /// Number of 1×1 bombs currently resting on the board (for BOOM).
+    public var bombsOnBoard: Int { board.bombCells().count }
+    /// Whether a superbomb is resting on the board (for BIG BOOM).
+    public var hasSuperbombOnBoard: Bool { !board.superbombCells().isEmpty }
 
     /// Upcoming pentominoes for the preview queue (the bag order, ignoring any
     /// armed boost — that's surfaced separately via `queuedBoost`).
@@ -117,8 +133,33 @@ public struct GameSession: Sendable {
         case .flip:      return tryFlip(piece)
         case .softDrop:  return gravityStep()
         case .hardDrop:  return hardDrop()
-        case .hold:      return hold()
+        case .hold:      return toggleHold(slot: holds.firstIndex(where: { $0 == nil }) ?? 0)
         }
+    }
+
+    /// Detonate every resting bomb: each clears its row + column, all together,
+    /// so bombs sharing a row/column cascade into one big clear. Scores by cells
+    /// removed × bomb count. Returns cells cleared.
+    @discardableResult
+    public mutating func detonateBombs() -> Int {
+        guard status == .playing else { return 0 }
+        let bombs = board.bombCells()
+        guard !bombs.isEmpty else { return 0 }
+        let cleared = board.detonate(bombs)
+        scoring.registerBombClear(cells: cleared, bombs: bombs.count)
+        detonationEventID += 1
+        return cleared
+    }
+
+    /// BIG BOOM: detonate all resting superbombs (6×6 block + their full
+    /// rows/columns). Returns cells cleared.
+    @discardableResult
+    public mutating func detonateSuperbombs() -> Int {
+        guard status == .playing, hasSuperbombOnBoard else { return 0 }
+        let cleared = board.detonateSuperbombs()
+        scoring.registerBombClear(cells: cleared, bombs: 4)
+        detonationEventID += 1
+        return cleared
     }
 
     /// Whether the active piece is resting on the stack/floor (can't fall).
@@ -197,20 +238,24 @@ public struct GameSession: Sendable {
         return true
     }
 
-    private mutating func hold() -> Bool {
-        guard !holdUsedThisTurn, let piece = active else { return false }
-        // Only pentominoes can be held; boosts are deployed, not stashed.
-        guard case .pentomino(let current) = piece.kind else { return false }
-        holdUsedThisTurn = true
-        if let previouslyHeld = held {
-            held = current
-            let orientation = previouslyHeld.orientations[0]
+    /// Park the current pentomino into reserve `slot` (empty), or swap it back
+    /// in (filled). Once per spawned piece; boosts can't be stashed.
+    @discardableResult
+    public mutating func toggleHold(slot: Int) -> Bool {
+        guard status == .playing, !holdUsedThisTurn, let piece = active,
+              holds.indices.contains(slot),
+              case .pentomino(let current) = piece.kind else { return false }
+        if let stashed = holds[slot] {
+            holds[slot] = current
+            let orientation = stashed.orientations[0]
             let startX = max(0, (board.width - orientation.width) / 2)
-            active = ActivePiece(kind: .pentomino(previouslyHeld), origin: Coord(startX, 0))
+            active = ActivePiece(kind: .pentomino(stashed), origin: Coord(startX, 0))
         } else {
-            held = current
+            holds[slot] = current
             spawn()
         }
+        // Set after spawn() (which resets the flag) so it's truly once-per-piece.
+        holdUsedThisTurn = true
         return true
     }
 
@@ -219,14 +264,32 @@ public struct GameSession: Sendable {
     private mutating func lock(_ piece: ActivePiece) {
         board.settle(piece.absoluteCells, as: piece.kind)
         let rows = board.fullRows()
+        // A bomb caught in a line clear isn't destroyed or auto-detonated — it
+        // returns to your inventory. Clearing a line you built shouldn't cost
+        // you a bomb or blow up the pattern around it.
+        let recoveredBombs = rows.reduce(0) { sum, y in
+            sum + board.cells[y].lazy.filter { $0 == .boost(.bomb) }.count
+        }
         let cleared = board.clearRows(rows)
         scoring.registerLock(rowsCleared: cleared)
         if cleared > 0 {
-            boosts[.single, default: 0] += cleared * GameSession.singlesPerRow
-            boosts[.double, default: 0] += cleared * GameSession.doublesPerRow
+            boosts[.single, default: 0] += cleared * GameSession.singlesPerLine
+            linesTowardBomb += cleared
+            while linesTowardBomb >= GameSession.linesPerBomb {
+                boosts[.bomb, default: 0] += 1
+                linesTowardBomb -= GameSession.linesPerBomb
+            }
+            linesTowardSuperbomb += cleared
+            while linesTowardSuperbomb >= GameSession.linesPerSuperbomb {
+                boosts[.superbomb, default: 0] += 1
+                linesTowardSuperbomb -= GameSession.linesPerSuperbomb
+            }
             lastClearedRows = rows
             clearEventID += 1
             if cleared >= 2 { celebrationEventID += 1 }
+        }
+        if recoveredBombs > 0 {
+            boosts[.bomb, default: 0] += recoveredBombs
         }
         active = nil
         spawn()

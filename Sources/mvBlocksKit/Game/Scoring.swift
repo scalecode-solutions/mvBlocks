@@ -50,4 +50,11 @@ public struct Scoring: Sendable, Codable {
     public mutating func addDropBonus(cells: Int) {
         score += max(0, cells)
     }
+
+    /// Bomb detonation: points scale with cells cleared and bomb count (the
+    /// chain bonus) and the level multiplier. Does not touch the line combo.
+    public mutating func registerBombClear(cells: Int, bombs: Int) {
+        guard cells > 0 else { return }
+        score += cells * 5 * max(1, bombs) * (level + 1)
+    }
 }

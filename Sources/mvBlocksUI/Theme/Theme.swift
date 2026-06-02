@@ -16,9 +16,12 @@ public struct Theme: Sendable {
     public var headlineColor: Color
     /// Secondary body text.
     public var bodyColor: Color
-    /// Fill for boost blocks (singles + doubles) — a bright neutral that reads
-    /// as "special" against the colored pentominoes.
+    /// Fill for single (filler) boost blocks — a bright neutral.
     public var boostColor: Color
+    /// Fill for bombs — hot red so they read as "danger / detonate me".
+    public var bombColor: Color = Color(red: 0.96, green: 0.30, blue: 0.26)
+    /// Fill for superbombs — electric violet, a tier above the red bomb.
+    public var superbombColor: Color = Color(red: 0.70, green: 0.36, blue: 1.0)
     /// Per-pentomino fill colors. Must cover all twelve cases.
     public var pieceColors: [Pentomino: Color]
 
@@ -51,7 +54,12 @@ public struct Theme: Sendable {
     public func color(for kind: PieceKind) -> Color {
         switch kind {
         case .pentomino(let p): color(for: p)
-        case .boost: boostColor
+        case .boost(let b):
+            switch b {
+            case .bomb: bombColor
+            case .superbomb: superbombColor
+            case .single: boostColor
+            }
         }
     }
 }
